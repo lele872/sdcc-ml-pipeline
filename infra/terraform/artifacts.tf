@@ -34,7 +34,7 @@ resource "aws_s3_object" "infer_zip" {
 resource "aws_s3_object" "scan_zip" {
   bucket = aws_s3_bucket.artifacts.id
   key    = "lambdas/scan.zip"
-  source = "../../.build/scan.zip"
+  source = fileexists("../../.build/scan.zip") ? "../../.build/scan.zip" : null
 
-  etag = filemd5("../../.build/scan.zip")
+  etag = fileexists("../../.build/scan.zip") ? filemd5("../../.build/scan.zip") : null
 }
