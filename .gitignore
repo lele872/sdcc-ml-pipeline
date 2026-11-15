@@ -19,3 +19,4 @@ infra/terraform/*.tfplan
 node_modules/
 backend/dist/
 frontend/dist/
+.DS_Store
