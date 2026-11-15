@@ -8,25 +8,7 @@ Una pipeline di machine learning interamente automatica su architettura serverle
 
 ## Come è fatto il sistema
 
-```
-                    ┌──────────────────────── pipeline event-driven ───────────────────────┐
- upload CSV         │                                                                      │
- ──────────────▶ S3 sdcc-raw/incoming/ ─▶ Lambda SCAN (ClamAV)                             │
-                        pulito → approved/        infetto → sdcc-quarantine                │
-                              │                                                      │
-                        Lambda PREPROCESS (nulli, encoding, normalizzazione)             │
-                              │ → sdcc-processed/                                     │
-                        Lambda TRAIN (scikit-learn, 2 modelli a confronto)                │
-                              │ → sdcc-models/  + email SES di notifica                 │
-                    └──────────────────────────────────────────────────────────────────────┘
-
- frontend :5173 ──▶ Traefik :3000 (ingresso unico, auto-discovery)
-                      ├─ /api/login /api/me   → auth    :3001
-                      ├─ /api/predici         → predici :3002 ──▶ API GW Floci ──▶ Lambda INFER
-                      ├─ /api/upload          → upload  :3003
-                      ├─ /api/logs            → logs    :3004
-                      └─ /healthz             → health  :3005
-```
+![Architettura del sistema](docs/schema.png)
 
 Il sistema instrada il traffico in tre modi diversi, ognuno col suo scopo: **Traefik** porta le chiamate del browser ai microservizi (HTTP, autenticazione applicativa), l'**API Gateway AWS** dà accesso serverless alle funzioni Lambda, e i **trigger S3** governano la pipeline, dove nessuno chiama nessuno — sono i dati che, arrivando, fanno succedere le cose.
 
