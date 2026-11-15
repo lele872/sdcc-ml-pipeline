@@ -1,7 +1,7 @@
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
-import { LogsModule } from '../../logs/logs.module'
 import { JwtGuard } from '../../auth/jwt.guard'
+import { LogsModule } from '../../logs/logs.module'
 
 async function bootstrap() {
   const app = await NestFactory.create(LogsModule)

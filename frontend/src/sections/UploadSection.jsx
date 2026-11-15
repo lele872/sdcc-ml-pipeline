@@ -54,7 +54,10 @@ export default function UploadSection() {
   }
 
   return (
-    <Page title="Upload dataset" subtitle="Carica qui il dataset CSV: da solo partirà tutta la pipeline (scansione antivirus, pulizia dati, training del modello). A fine training arriva un'email di notifica.">
+    <Page
+      title="Upload dataset"
+      subtitle="Carica qui il dataset CSV: da solo partirà tutta la pipeline (scansione antivirus, pulizia dati, training del modello). A fine training arriva un'email di notifica."
+    >
       <Card title="File CSV">
         <Upload.Dragger {...uploadProps} style={{ padding: '32px 0' }}>
           <p className="ant-upload-drag-icon" style={{ fontSize: 56 }}>

@@ -113,7 +113,10 @@ export default function LogsSection() {
   ]
 
   return (
-    <Page title="Logs" subtitle="La cronologia di ciò che ha fatto la pipeline: cosa ha scansionato ClamAV, quali file sono stati approvati o messi in quarantena, e i training completati.">
+    <Page
+      title="Logs"
+      subtitle="La cronologia di ciò che ha fatto la pipeline: cosa ha scansionato ClamAV, quali file sono stati approvati o messi in quarantena, e i training completati."
+    >
       <Card title="Filtri">
         <Space wrap size="middle">
           <Select value={gruppo} onChange={setGruppo} style={{ width: 320 }}>
@@ -185,7 +188,11 @@ export default function LogsSection() {
             <div>
               <Typography.Text type="secondary">Stream</Typography.Text>
               <div>
-                {selezionato.stream ? <Tag>{selezionato.stream}</Tag> : <Typography.Text type="secondary">—</Typography.Text>}
+                {selezionato.stream ? (
+                  <Tag>{selezionato.stream}</Tag>
+                ) : (
+                  <Typography.Text type="secondary">—</Typography.Text>
+                )}
               </div>
             </div>
             <div>

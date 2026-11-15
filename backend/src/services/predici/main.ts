@@ -1,7 +1,7 @@
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
-import { PrediciModule } from '../../predici/predici.module'
 import { JwtGuard } from '../../auth/jwt.guard'
+import { PrediciModule } from '../../predici/predici.module'
 
 async function bootstrap() {
   const app = await NestFactory.create(PrediciModule)

@@ -1,7 +1,7 @@
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
-import { UploadModule } from '../../upload/upload.module'
 import { JwtGuard } from '../../auth/jwt.guard'
+import { UploadModule } from '../../upload/upload.module'
 
 async function bootstrap() {
   const app = await NestFactory.create(UploadModule)
