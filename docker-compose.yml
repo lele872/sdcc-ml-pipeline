@@ -1,0 +1,297 @@
+# ═══════════════════════════════════════════════════════════════════
+#  SDCC ML Pipeline — ambiente locale di sviluppo
+#  Emulazione AWS via Floci (https://floci.io)
+#
+#  Avvio:   docker compose --profile infra up -d
+#  Stop:    docker compose --profile infra down
+#  Reset:   docker compose --profile infra down && rm -rf .docker-data
+# ═══════════════════════════════════════════════════════════════════
+
+networks:
+  sdcc_dev_network:
+    name: sdcc_dev_network
+
+volumes:
+  trivy-cache:
+
+services:
+  # ═════════════════════════════════════════════════════════════════
+  #  PROFILE infra — Floci (emulatore AWS locale, porta 4566)
+  # ═════════════════════════════════════════════════════════════════
+
+  floci:
+    image: floci/floci:latest
+    container_name: floci_sdcc_local
+    profiles:
+      - infra
+    ports:
+      - '4566:4566'
+    environment:
+      - FLOCI_DEFAULT_REGION=eu-south-1
+      - FLOCI_DEFAULT_ACCOUNT_ID=000000000000
+      # ephemeral con bind mount locale: evita bug permessi named volume di floci/orbstack
+      - FLOCI_STORAGE_MODE=hybrid
+      - FLOCI_STORAGE_PERSISTENT_PATH=/data
+      - FLOCI_HOSTNAME=floci
+      - QUARKUS_LOG_LEVEL=INFO
+    volumes:
+      - ./.docker-data/floci:/data
+      - ${HOME}/.orbstack/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "</dev/tcp/localhost/4566"']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks:
+      - sdcc_dev_network
+
+  # ═════════════════════════════════════════════════════════════════
+  #  PROFILE infra — Floci Init
+  #  Crea i bucket S3 della pipeline dopo l'avvio di floci.
+  #
+  #  Bucket:
+  #   - sdcc-raw        → dataset caricati dall'utente (FASE 1, trigger)
+  #   - sdcc-processed  → dataset puliti e trasformati (output FASE 2)
+  #   - sdcc-models     → modelli serializzati (output FASE 3)
+  #  Verifica indirizzo email SES per le notifiche di fine training.
+  # ═════════════════════════════════════════════════════════════════
+
+  floci-init:
+    image: floci/floci:latest-compat
+    container_name: floci_sdcc_init
+    profiles:
+      - infra
+    depends_on:
+      floci:
+        condition: service_healthy
+    environment:
+      - AWS_ENDPOINT_URL=http://floci:4566
+      - AWS_DEFAULT_REGION=eu-south-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo '=== Floci Init: creazione risorse AWS locali ==='
+        aws s3 mb s3://sdcc-raw || true
+        aws s3 mb s3://sdcc-processed || true
+        aws s3 mb s3://sdcc-models || true
+        aws ses verify-email-identity --email-address training@sdcc-local.dev || true
+        echo '=== Floci Init completato ==='
+    networks:
+      - sdcc_dev_network
+
+  clamav:
+    image: clamav/clamav:latest
+    container_name: clamav_daemon
+    platform: linux/amd64
+    profiles:
+      - infra
+    ports:
+      - '3310:3310'
+    volumes:
+      - ./.docker-data/clamav:/var/lib/clamav
+    networks:
+      - sdcc_dev_network
+
+  # ------------------------------------------------------------------
+  #  PROFILE security - Trivy (oneshot)
+  #  Scansione vulnerabilita' delle immagini usate dal progetto.
+  #  Container effimero: pulla le immagini dal registry ed esce.
+  #      docker compose --profile security run --rm trivy-scan
+  # ------------------------------------------------------------------
+
+  trivy-scan:
+    image: aquasec/trivy:latest
+    container_name: trivy_scan_oneshot
+    profiles:
+      - security
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo '=== Trivy: scansione vulnerabilita immagini ==='
+        trivy image --scanners vuln floci/floci:latest
+        trivy image --scanners vuln floci/floci-ui:latest
+        echo '=== Scansione completata ==='
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+    networks:
+      - sdcc_dev_network
+
+  traefik:
+    image: traefik:v3.7
+    container_name: sdcc_traefik
+    profiles:
+      - infra
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=sdcc_dev_network
+      - --entrypoints.web.address=:3000
+      - --api.dashboard=true
+      - --api.insecure=true
+    ports:
+      - '3000:3000'
+      - '8080:8080'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - sdcc_dev_network
+
+  auth:
+    build:
+      context: ./backend
+      args:
+        SERVICE: auth
+    container_name: sdcc_auth
+    profiles: [infra]
+    environment:
+      - PORT=3001
+      - AUTH_MODE=cognito
+      - FLOCI_URL=http://floci:4566
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+      - BFF_JWT_SECRET=sdcc-dev-secret
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.auth.rule=PathPrefix(`/api/login`) || PathPrefix(`/api/me`) || PathPrefix(`/api/docs`)
+      - traefik.http.services.auth.loadbalancer.server.port=3001
+    depends_on:
+      floci:
+        condition: service_healthy
+    networks:
+      - sdcc_dev_network
+
+  predici:
+    build:
+      context: ./backend
+      args:
+        SERVICE: predici
+    container_name: sdcc_predici
+    profiles: [infra]
+    environment:
+      - PORT=3002
+      - FLOCI_URL=http://floci:4566
+      - API_PREDICI_URL=http://floci:4566/restapis/241401da00/dev/_user_request_/predici
+      - AUTH_MODE=cognito
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.predici.rule=PathPrefix(`/api/predici`)
+      - traefik.http.services.predici.loadbalancer.server.port=3002
+    depends_on:
+      floci:
+        condition: service_healthy
+    networks:
+      - sdcc_dev_network
+
+  upload:
+    build:
+      context: ./backend
+      args:
+        SERVICE: upload
+    container_name: sdcc_upload
+    profiles: [infra]
+    environment:
+      - PORT=3003
+      - FLOCI_URL=http://floci:4566
+      - AUTH_MODE=cognito
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.upload.rule=PathPrefix(`/api/upload`) || PathPrefix(`/dataset-example`)
+      - traefik.http.services.upload.loadbalancer.server.port=3003
+    depends_on:
+      floci:
+        condition: service_healthy
+    networks:
+      - sdcc_dev_network
+
+  logs:
+    build:
+      context: ./backend
+      args:
+        SERVICE: logs
+    container_name: sdcc_logs
+    profiles: [infra]
+    environment:
+      - PORT=3004
+      - FLOCI_URL=http://floci:4566
+      - AUTH_MODE=cognito
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.logs.rule=PathPrefix(`/api/logs`)
+      - traefik.http.services.logs.loadbalancer.server.port=3004
+    depends_on:
+      floci:
+        condition: service_healthy
+    networks:
+      - sdcc_dev_network
+
+  health:
+    build:
+      context: ./backend
+      args:
+        SERVICE: health
+    container_name: sdcc_health
+    profiles: [infra]
+    environment:
+      - PORT=3005
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.health.rule=PathPrefix(`/healthz`)
+      - traefik.http.services.health.loadbalancer.server.port=3005
+    networks:
+      - sdcc_dev_network
+
+  frontend:
+    image: node:20-alpine
+    container_name: sdcc_frontend
+    profiles:
+      - infra
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - ./backend/src/common:/backend/src/common
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - '5173:5173'
+    environment:
+      - VITE_BFF_URL=http://localhost:3000
+    depends_on:
+      - traefik
+    networks:
+      - sdcc_dev_network
+
+  # ═════════════════════════════════════════════════════════════════
+  #  PROFILE infra — Floci UI (console web per l'emulatore AWS locale)
+  #
+  #  Immagine ufficiale singola (UI + API sulla stessa porta 4500).
+  #  FLOCI_ENDPOINT punta al servizio 'floci' sulla rete compose condivisa.
+  # ═════════════════════════════════════════════════════════════════
+
+  floci-ui:
+    image: floci/floci-ui:latest
+    container_name: floci_sdcc_ui
+    profiles:
+      - infra
+    ports:
+      - '4500:4500'
+    environment:
+      - FLOCI_ENDPOINT=http://floci:4566
+      - AWS_REGION=eu-south-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    depends_on:
+      floci:
+        condition: service_healthy
+    networks:
+      - sdcc_dev_network

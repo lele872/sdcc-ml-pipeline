@@ -1,0 +1,42 @@
+{
+  "name": "sdcc-ml-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "nx": {
+    "targets": {
+      "scan:image": {
+        "command": "if command -v trivy >/dev/null 2>&1; then trivy image --scanners vuln floci/floci:latest && trivy image --scanners vuln floci/floci-ui:latest; else docker compose --profile security run --rm trivy-scan; fi"
+      },
+      "lint:python": {
+        "command": ".venv/bin/ruff check playground/ lambdas/ scripts/ tests/ && .venv/bin/ruff format --check playground/ lambdas/ scripts/ tests/"
+      },
+      "test:python": {
+        "command": ".venv/bin/python -m pytest tests/ -v"
+      },
+      "test:preprocess": {
+        "command": ".venv/bin/python -m pytest tests/test_preprocess.py -v"
+      },
+      "build:lambdas": {
+        "command": ".venv/bin/python scripts/build_lambdas.py"
+      },
+      "lint:javascript": {
+        "command": "npx -y @biomejs/biome check frontend/src backend/src"
+      },
+      "format:javascript": {
+        "command": "npx -y @biomejs/biome check --write frontend/src backend/src"
+      },
+      "build:preprocess": {
+        "command": ".venv/bin/python scripts/build_lambdas.py --only preprocess"
+      },
+      "build:train": {
+        "command": ".venv/bin/python scripts/build_lambdas.py --only train"
+      },
+      "build:infer": {
+        "command": ".venv/bin/python scripts/build_lambdas.py --only infer"
+      },
+      "build:scan": {
+        "command": ".venv/bin/python scripts/build_lambdas.py --only scan"
+      }
+    }
+  }
+}

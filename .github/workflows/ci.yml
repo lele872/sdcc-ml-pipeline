@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+jobs:
+  python:
+    name: Python (lint + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt boto3 pytest
+      - run: pip install ruff
+      - run: ruff check playground/ lambdas/ scripts/ tests/
+      - run: ruff format --check playground/ lambdas/ scripts/ tests/
+      - run: python -m pytest tests/ -v
+
+  javascript:
+    name: JS/TS (biome + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx -y @biomejs/biome check frontend/src backend/src
+      - name: Build backend
+        working-directory: backend
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npx vite build
+
+  terraform:
+    name: Terraform (fmt + validate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  security:
+    name: Sicurezza (dipendenze + immagini + iac)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy su filesystem e immagini del compose
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+      - name: Audit dipendenze Python
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --desc || true
+      - name: Audit dipendenze frontend
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+      - name: Audit dipendenze backend
+        working-directory: backend
+        run: npm install --legacy-peer-deps --package-lock-only && npm audit --audit-level=high || true
